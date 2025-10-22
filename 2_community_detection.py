@@ -375,6 +375,45 @@ def analyze_communities(G, communities, first_author_key='first_author', year_ke
     
     return metrics
 
+def get_densest_community_papers(G, partition, communities):
+    """Find papers in the most densely connected community"""
+    
+    # Find densest community
+    best_community = None
+    best_density = 0
+    
+    for comm_id, nodes in communities.items():
+        if len(nodes) < 3:  # Skip tiny communities
+            continue
+            
+        subgraph = G.subgraph(nodes)
+        density = nx.density(subgraph)
+        
+        if density > best_density:
+            best_density = density
+            best_community = comm_id
+    
+    print(f"\nDensest community: {best_community} (density: {best_density:.3f})")
+    
+    # Get papers in that community, sorted by degree within community
+    dense_papers = []
+    nodes_in_community = communities[best_community]
+    subgraph = G.subgraph(nodes_in_community)
+    
+    for node in nodes_in_community:
+        degree_in_community = subgraph.degree(node)
+        dense_papers.append({
+            'DOI': node,
+            'Label': G.nodes[node].get('label', 'Unknown'),
+            'First Author': G.nodes[node].get('first_author', 'Unknown'),
+            'Year': G.nodes[node].get('year', 'Unknown'),
+            'Degree_in_cluster': degree_in_community,
+            'Community': best_community
+        })
+    
+    dense_papers.sort(key=lambda x: x['Degree_in_cluster'], reverse=True)
+    return dense_papers
+
 def plot_community_metrics(metrics, algorithm_name, output_file=None):
     """Plot metrics for communities."""
     # Filter out single-node communities
@@ -500,6 +539,47 @@ def get_most_important_papers(G, partition, top_n=20):
     # Sort by degree (most connected)
     results.sort(key=lambda x: x['Degree'], reverse=True)
     return results[:top_n]
+def get_largest_connected_community_papers(G, partition, communities):
+    """Find papers in the largest well-connected community"""
+    
+    # Find community with most total connections (size * avg degree)
+    best_community = None
+    best_score = 0
+    
+    for comm_id, nodes in communities.items():
+        if len(nodes) < 10:  # Skip small communities
+            continue
+            
+        subgraph = G.subgraph(nodes)
+        total_edges = subgraph.number_of_edges()
+        avg_degree = (2 * total_edges) / len(nodes) if len(nodes) > 0 else 0
+        score = len(nodes) * avg_degree  # Size × connectivity
+        
+        if score > best_score:
+            best_score = score
+            best_community = comm_id
+    
+    print(f"\nLargest connected community: {best_community}")
+    print(f"Size: {len(communities[best_community])} papers")
+    
+    # Get papers sorted by degree
+    papers = []
+    nodes_in_community = communities[best_community]
+    subgraph = G.subgraph(nodes_in_community)
+    
+    for node in nodes_in_community:
+        degree_in_community = subgraph.degree(node)
+        papers.append({
+            'DOI': node,
+            'Label': G.nodes[node].get('label', 'Unknown'),
+            'First Author': G.nodes[node].get('first_author', 'Unknown'),
+            'Year': G.nodes[node].get('year', 'Unknown'),
+            'Degree_in_cluster': degree_in_community,
+            'Community': best_community
+        })
+    
+    papers.sort(key=lambda x: x['Degree_in_cluster'], reverse=True)
+    return papers
 
 def main():
     # Load the citation graph
@@ -609,6 +689,20 @@ def main():
     for i, paper in enumerate(important_papers, 1):
         print(f"\n{i}. {paper['Label']}")
         print(f"   Degree: {paper['Degree']} | Community: {paper['Community']}")
+        print(f"   DOI: {paper['DOI']}")
+
+
+    #get the densest papers
+
+    print("\n" + "="*80)
+    print("PAPERS IN DENSEST COMMUNITY:")
+    print("="*80)
+    dense_papers = get_largest_connected_community_papers(citation_graph, louvain_partition, louvain_communities)
+    
+    print(f"\nFound {len(dense_papers)} papers in densest cluster:")
+    for i, paper in enumerate(dense_papers[:20], 1):
+        print(f"\n{i}. {paper['Label']}")
+        print(f"   Connections in cluster: {paper['Degree_in_cluster']}")
         print(f"   DOI: {paper['DOI']}")
 
 if __name__ == "__main__":
