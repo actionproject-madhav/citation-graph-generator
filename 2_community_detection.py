@@ -82,6 +82,124 @@ def detect_communities_leiden(G):
     
     return node_community, communities
 
+def detect_communities_girvan_newman(G, num_communities=None):
+    """
+    Detect communities using the Girvan-Newman algorithm.
+    
+    Parameters:
+    -----------
+    G : networkx.Graph
+        The citation graph
+    num_communities : int, optional
+        Desired number of communities. If None, uses modularity to determine optimal split.
+    
+    Returns:
+    --------
+    partition : dict
+        Mapping of node IDs to community IDs
+    communities : dict
+        Mapping of community IDs to lists of node IDs
+    """
+    print("Detecting communities using Girvan-Newman algorithm...")
+    
+    # Convert to undirected graph for Girvan-Newman algorithm
+    print("Converting directed graph to undirected for Girvan-Newman algorithm...")
+    G_undirected = G.to_undirected()
+    
+    # Run Girvan-Newman algorithm
+    from networkx.algorithms.community import girvan_newman
+    
+    # Get the iterator of community divisions
+    communities_generator = girvan_newman(G_undirected)
+    
+    if num_communities is None:
+        # Find the best partition by modularity
+        print("Finding optimal number of communities by maximizing modularity...")
+        best_modularity = -1
+        best_communities = None
+        
+        # Iterate through different numbers of communities
+        # Limit to reasonable number to avoid excessive computation
+        max_iterations = min(20, G_undirected.number_of_nodes() - 1)
+        
+        for i, communities_tuple in enumerate(communities_generator):
+            if i >= max_iterations:
+                break
+            
+            # Convert to list of sets
+            communities_list = list(communities_tuple)
+            
+            # Calculate modularity
+            modularity = nx.algorithms.community.modularity(G_undirected, communities_list)
+            
+            print(f"  {len(communities_list)} communities: modularity = {modularity:.4f}")
+            
+            if modularity > best_modularity:
+                best_modularity = modularity
+                best_communities = communities_list
+        
+        print(f"Best modularity: {best_modularity:.4f} with {len(best_communities)} communities")
+        communities_list = best_communities
+    else:
+        # Get specific number of communities
+        print(f"Extracting {num_communities} communities...")
+        for _ in range(num_communities - 1):
+            communities_tuple = next(communities_generator)
+        communities_list = list(communities_tuple)
+    
+    # Convert to the same format as other algorithms
+    communities = {}
+    partition = {}
+    
+    for community_id, community_set in enumerate(communities_list):
+        communities[community_id] = list(community_set)
+        for node in community_set:
+            partition[node] = community_id
+    
+    print(f"Detected {len(communities)} communities using Girvan-Newman algorithm.")
+    # Print community sizes
+    for community_id, nodes in sorted(communities.items(), key=lambda x: len(x[1]), reverse=True):
+        print(f"Community {community_id}: {len(nodes)} nodes")
+    
+    return partition, communities
+def export_community_assignments_extended(G, louvain_partition, leiden_partition, girvan_newman_partition, output_file):
+    """
+    Export node information and community assignments to a CSV file.
+    """
+    print(f"Exporting community assignments to {output_file}...")
+    
+    # Create a list to store the data
+    data = []
+    
+    for node in G.nodes():
+        # Get node attributes
+        first_author = G.nodes[node].get('first_author', 'Unknown')
+        year = G.nodes[node].get('year', 'Unknown')
+        label = G.nodes[node].get('label', f"{first_author}, {year}")
+        doi = node  # The node ID is the DOI
+        
+        # Get community assignments
+        louvain_community = louvain_partition.get(node, 'Not assigned')
+        leiden_community = leiden_partition.get(node, 'Not assigned')
+        girvan_newman_community = girvan_newman_partition.get(node, 'Not assigned')
+        
+        # Add to data list
+        data.append({
+            'DOI': doi,
+            'Label': label,
+            'First Author': first_author,
+            'Year': year,
+            'Louvain Community': louvain_community,
+            'Leiden Community': leiden_community,
+            'Girvan-Newman Community': girvan_newman_community
+        })
+    
+    # Create dataframe and export to CSV
+    df = pd.DataFrame(data)
+    df.to_csv(output_file, index=False)
+    print(f"Exported {len(data)} nodes to {output_file}")
+
+
 def plot_communities(G, partition, algorithm_name, output_file=None, label_all_nodes=True):
     """Plot the graph with communities colored differently."""
     plt.figure(figsize=(14, 14))
@@ -167,6 +285,8 @@ def plot_communities(G, partition, algorithm_name, output_file=None, label_all_n
     
     plt.legend(loc='upper right', fontsize=10)
     plt.axis('off')
+    
+
     
     if output_file:
         # Ensure output directory exists
@@ -360,6 +480,27 @@ def export_community_assignments(G, louvain_partition, leiden_partition, output_
     df.to_csv(output_file, index=False)
     print(f"Exported {len(data)} nodes to {output_file}")
 
+def get_most_important_papers(G, partition, top_n=20):
+    """Find most important papers by degree centrality within communities"""
+    results = []
+    
+    for node in G.nodes():
+        degree = G.degree(node)
+        community = partition.get(node)
+        
+        results.append({
+            'DOI': node,
+            'Label': G.nodes[node].get('label', 'Unknown'),
+            'First Author': G.nodes[node].get('first_author', 'Unknown'),
+            'Year': G.nodes[node].get('year', 'Unknown'),
+            'Degree': degree,
+            'Community': community
+        })
+    
+    # Sort by degree (most connected)
+    results.sort(key=lambda x: x['Degree'], reverse=True)
+    return results[:top_n]
+
 def main():
     # Load the citation graph
     citation_graph = load_citation_graph('output/citation_graph.graphml')
@@ -379,6 +520,18 @@ def main():
     # Plot metrics for Louvain communities
     plot_community_metrics(louvain_metrics, "Louvain", "output/louvain_metrics.png")
     
+    # Detect communities using Girvan-Newman algorithm
+    girvan_newman_partition, girvan_newman_communities = detect_communities_girvan_newman(citation_graph)
+    
+    # Plot the communities detected by Girvan-Newman
+    plot_communities(citation_graph, girvan_newman_partition, "Girvan-Newman", "output/girvan_newman_communities.png", label_all_nodes=True)
+    
+    # Analyze Girvan-Newman communities
+    girvan_newman_metrics = analyze_communities(citation_graph, girvan_newman_communities)
+    
+    # Plot metrics for Girvan-Newman communities
+    plot_community_metrics(girvan_newman_metrics, "Girvan-Newman", "output/girvan_newman_metrics.png")
+    
     # Create empty leiden_partition as a fallback
     leiden_partition = {}
     
@@ -395,9 +548,10 @@ def main():
         # Plot metrics for Leiden communities
         plot_community_metrics(leiden_metrics, "Leiden", "output/leiden_metrics.png")
         
-        # Compare Louvain and Leiden results
-        print("\nComparison between Louvain and Leiden algorithms:")
+        # Compare all algorithms
+        print("\nComparison between algorithms:")
         print(f"Louvain detected {len(louvain_communities)} communities.")
+        print(f"Girvan-Newman detected {len(girvan_newman_communities)} communities.")
         print(f"Leiden detected {len(leiden_communities)} communities.")
         
         # Calculate community similarity using adjusted rand index
@@ -406,20 +560,56 @@ def main():
             
             # Convert partitions to lists
             louvain_labels = [louvain_partition[node] for node in citation_graph.nodes()]
+            girvan_newman_labels = [girvan_newman_partition[node] for node in citation_graph.nodes()]
             leiden_labels = [leiden_partition[node] for node in citation_graph.nodes()]
             
-            # Calculate similarity
-            ari = adjusted_rand_score(louvain_labels, leiden_labels)
-            print(f"Adjusted Rand Index (similarity between partitions): {ari:.3f}")
+            # Calculate similarity between all pairs
+            ari_louvain_leiden = adjusted_rand_score(louvain_labels, leiden_labels)
+            ari_louvain_gn = adjusted_rand_score(louvain_labels, girvan_newman_labels)
+            ari_leiden_gn = adjusted_rand_score(leiden_labels, girvan_newman_labels)
+            
+            print(f"\nAdjusted Rand Index (similarity between partitions):")
+            print(f"  Louvain vs Leiden: {ari_louvain_leiden:.3f}")
+            print(f"  Louvain vs Girvan-Newman: {ari_louvain_gn:.3f}")
+            print(f"  Leiden vs Girvan-Newman: {ari_leiden_gn:.3f}")
         except ImportError:
             print("sklearn not installed, skipping partition similarity calculation.")
         
     except Exception as e:
         print(f"Error running Leiden algorithm: {e}")
-        print("Continuing with only Louvain results.")
+        print("Continuing with Louvain and Girvan-Newman results.")
+        
+        # Still compare Louvain and Girvan-Newman even if Leiden fails
+        print("\nComparison between algorithms:")
+        print(f"Louvain detected {len(louvain_communities)} communities.")
+        print(f"Girvan-Newman detected {len(girvan_newman_communities)} communities.")
+        
+        try:
+            from sklearn.metrics.cluster import adjusted_rand_score
+            
+            louvain_labels = [louvain_partition[node] for node in citation_graph.nodes()]
+            girvan_newman_labels = [girvan_newman_partition[node] for node in citation_graph.nodes()]
+            
+            ari_louvain_gn = adjusted_rand_score(louvain_labels, girvan_newman_labels)
+            print(f"\nAdjusted Rand Index (Louvain vs Girvan-Newman): {ari_louvain_gn:.3f}")
+        except ImportError:
+            print("sklearn not installed, skipping partition similarity calculation.")
     
-    # Export community assignments to CSV
-    export_community_assignments(citation_graph, louvain_partition, leiden_partition, "output/community_assignments.csv")
+    # Export community assignments to CSV (including all three algorithms)
+    export_community_assignments_extended(citation_graph, louvain_partition, leiden_partition, 
+                                         girvan_newman_partition, "output/community_assignments.csv")
+
+
+    # Get most important papers
+    print("\n" + "="*80)
+    print("TOP 20 MOST CONNECTED PAPERS:")
+    print("="*80)
+    important_papers = get_most_important_papers(citation_graph, louvain_partition, top_n=20)
+    
+    for i, paper in enumerate(important_papers, 1):
+        print(f"\n{i}. {paper['Label']}")
+        print(f"   Degree: {paper['Degree']} | Community: {paper['Community']}")
+        print(f"   DOI: {paper['DOI']}")
 
 if __name__ == "__main__":
     main()

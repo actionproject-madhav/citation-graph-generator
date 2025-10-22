@@ -1124,7 +1124,7 @@ def export_graph_for_visualization(G, output_dir):
 if __name__ == "__main__":
     # Set up command line arguments
     parser = argparse.ArgumentParser(description='Generate a citation graph from a BibTeX file using citation APIs.')
-    parser.add_argument('--bibtex', default="Exported Items.bib", help='Path to the BibTeX file (default: Exported Items.bib)')
+    parser.add_argument('--bibtex', default="citations.bib", help='Path to the BibTeX file (default: Exported Items.bib)')
     parser.add_argument('--cache', action='store_true', help='Use cached API IDs if available')
     parser.add_argument('--email', help='Email to use for API requests (helps with rate limits)')
     parser.add_argument('--output-dir', default="output", help='Directory to save output files (default: output)')
