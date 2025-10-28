@@ -581,6 +581,10 @@ def get_largest_connected_community_papers(G, partition, communities):
     papers.sort(key=lambda x: x['Degree_in_cluster'], reverse=True)
     return papers
 
+
+
+
+
 def main():
     # Load the citation graph
     citation_graph = load_citation_graph('output/citation_graph.graphml')
